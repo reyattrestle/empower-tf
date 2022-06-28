@@ -12,92 +12,11 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# Create a VPC
-resource "aws_vpc" "ecs-vpc" {
-  cidr_block = "10.0.0.0/16"
 
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-}
-
-resource "aws_subnet" "ecs-subnet" {
-  vpc_id            = aws_vpc.ecs-vpc.id
-  cidr_block        = "10.0.0.0/24"
-  availability_zone = "us-east-1a"
-
-  tags = {
-    Name = "tf-example"
-  }
-}
-resource "aws_subnet" "ecs-subnet-alt" {
-  vpc_id            = aws_vpc.ecs-vpc.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = "us-east-1b"
-
-  tags = {
-    Name = "tf-example"
-  }
-}
-
-
-resource "aws_network_acl" "main" {
-  egress = [
-    {
-      action          = "allow"
-      cidr_block      = "0.0.0.0/0"
-      from_port       = 0
-      icmp_code       = 0
-      icmp_type       = 0
-      ipv6_cidr_block = ""
-      protocol        = "-1"
-      rule_no         = 100
-      to_port         = 0
-    },
-  ]
-  ingress = [
-    {
-      action          = "allow"
-      cidr_block      = "0.0.0.0/0"
-      from_port       = 0
-      icmp_code       = 0
-      icmp_type       = 0
-      ipv6_cidr_block = ""
-      protocol        = "-1"
-      rule_no         = 100
-      to_port         = 0
-    },
-  ]
-  subnet_ids = [
-    aws_subnet.ecs-subnet.id,
-    aws_subnet.ecs-subnet-alt.id,
-  ]
-  vpc_id = aws_vpc.ecs-vpc.id
-}
-
-resource "aws_route_table" "main" {
-  propagating_vgws = []
-  route = [
-    {
-      cidr_block                 = "0.0.0.0/0"
-      egress_only_gateway_id     = ""
-      gateway_id                 = aws_internet_gateway.main.id
-      instance_id                = ""
-      ipv6_cidr_block            = ""
-      nat_gateway_id             = ""
-      network_interface_id       = ""
-      transit_gateway_id         = ""
-      vpc_peering_connection_id  = ""
-      carrier_gateway_id         = ""
-      destination_prefix_list_id = ""
-      local_gateway_id           = ""
-      vpc_endpoint_id            = ""
-    },
-  ]
-  vpc_id = aws_vpc.ecs-vpc.id
-}
-
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.ecs-vpc.id
+locals {
+  vpc        = "vpc-0afb3c676d3d9d4c7"
+  subnet     = "subnet-04b15c492caaac28f"
+  subnet-alt = "subnet-04de6d5aa012dcda1"
 }
 
 
@@ -148,7 +67,7 @@ resource "aws_security_group" "data" {
       to_port = 0
     },
   ]
-  vpc_id = aws_vpc.ecs-vpc.id
+  vpc_id = local.vpc
 
   timeouts {}
 
@@ -222,7 +141,7 @@ resource "aws_security_group" "service" {
       to_port          = 80
     }
   ]
-  vpc_id = aws_vpc.ecs-vpc.id
+  vpc_id = local.vpc
 
   timeouts {}
 
@@ -234,40 +153,40 @@ resource "aws_security_group" "service" {
 }
 
 
-resource "aws_ecs_cluster" "spoke-cluster" {
+resource "aws_ecs_cluster" "cluster" {
   capacity_providers = []
-  name               = "spoke-cluster"
+  name               = "cluster"
   setting {
     name  = "containerInsights"
     value = "enabled"
   }
 }
 
-resource "aws_key_pair" "spoke-ecs-key" {
-  key_name   = "spoke-ecs-key"
+resource "aws_key_pair" "ecs" {
+  key_name   = "ecs"
   public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDR2lxFNQcWwkqJqrDvk4FNtD6PISN415RhJVVQ5fqQhc2dfEB4AUqg25NAs4Aj8kSSEg+FpR0xboOnwvNn3fvgiFioXzqmyLzPMYGW3IeyWFlV93VUWL7yIcGF0WdeSX2AFGCPfHreS1nrTj8c00dOm/JMxDPNNWDDG488B7jbnwz8EiJOyynx3dpfQEK5WaIVZSvWr2sICg02gCspY6kk3A8aR9/kYFauQRAwKLq0OuFpF6V/Zgv5EBFeqZfj9EYygpu4lxYRq7qrlszIABtvNsPJ3jou/G56wVcPjLYDwjFt/iFYUdxKK4U50042ZocDIxzSceMhic2hna4PRryd reyrodrigues@DESKTOP-LJ3G9EQ"
 }
 
-resource "aws_autoscaling_group" "spoke-cluster" {
+resource "aws_autoscaling_group" "cluster" {
   default_cooldown          = 300
   desired_capacity          = 2
   enabled_metrics           = []
   health_check_grace_period = 0
   health_check_type         = "EC2"
-  launch_configuration      = aws_launch_configuration.spoke-cluster.id
+  launch_configuration      = aws_launch_configuration.cluster.id
   load_balancers            = []
   max_instance_lifetime     = 0
   max_size                  = 2
   metrics_granularity       = "1Minute"
   min_size                  = 0
-  name                      = "auto-scaling-group-spoke-cluster"
+  name                      = "auto-scaling-group-cluster"
   protect_from_scale_in     = false
   suspended_processes       = []
   target_group_arns         = []
   termination_policies      = []
   vpc_zone_identifier = [
-    aws_subnet.ecs-subnet.id,
-    aws_subnet.ecs-subnet-alt.id,
+    local.subnet,
+    local.subnet-alt,
   ]
   force_delete              = false
   wait_for_capacity_timeout = "10m"
@@ -275,16 +194,25 @@ resource "aws_autoscaling_group" "spoke-cluster" {
   timeouts {}
 }
 
-resource "aws_launch_configuration" "spoke-cluster" {
+resource "aws_iam_instance_profile" "clusterInstanceProfile" {
+  name = "clusterInstanceProfile"
+  role = aws_iam_role.ecs-service-role.name
+}
+
+
+resource "aws_launch_configuration" "cluster" {
   associate_public_ip_address = true
   ebs_optimized               = false
   enable_monitoring           = true
   image_id                    = "ami-06634c1b99d35f2c7"
-  instance_type               = "t3.small"
-  key_name                    = aws_key_pair.spoke-ecs-key.key_name
+  instance_type               = "t3.large"
+  key_name                    = aws_key_pair.ecs.key_name
+  iam_instance_profile        = aws_iam_instance_profile.clusterInstanceProfile.name
   security_groups = [
     aws_security_group.service.id,
   ]
+
+  user_data = templatefile("user_data.sh", { ecs_cluster = aws_ecs_cluster.cluster.name })
 
   ebs_block_device {
     delete_on_termination = false
@@ -295,10 +223,6 @@ resource "aws_launch_configuration" "spoke-cluster" {
     volume_size           = 22
     volume_type           = "gp2"
   }
-
-  lifecycle {
-    ignore_changes = [user_data]
-  }
 }
 
 
@@ -306,13 +230,14 @@ resource "aws_launch_configuration" "spoke-cluster" {
 resource "aws_db_subnet_group" "db-subnet-group" {
   name = "db-subnet-group"
   subnet_ids = [
-    aws_subnet.ecs-subnet.id,
-    aws_subnet.ecs-subnet-alt.id,
+    local.subnet,
+    local.subnet-alt,
   ]
 }
 
 
 resource "aws_db_instance" "spoke" {
+  count                               = 0
   allocated_storage                   = 20
   auto_minor_version_upgrade          = true
   availability_zone                   = "us-east-1b"
@@ -351,7 +276,9 @@ resource "aws_db_instance" "spoke" {
   }
 }
 
-
+resource "aws_cloudwatch_log_group" "log_group" {
+  name = "/ecs/web-app"
+}
 
 resource "aws_iam_role" "ecs-service-role" {
   assume_role_policy = jsonencode(
@@ -361,7 +288,7 @@ resource "aws_iam_role" "ecs-service-role" {
           Action = "sts:AssumeRole"
           Effect = "Allow"
           Principal = {
-            Service = "ecs.amazonaws.com"
+            Service = ["ecs.amazonaws.com", "ecs-tasks.amazonaws.com", "ec2.amazonaws.com"]
           }
           Sid = ""
         },
@@ -376,13 +303,23 @@ resource "aws_iam_role" "ecs-service-role" {
   tags                  = {}
 }
 
-resource "aws_iam_role_policy_attachment" "ecs-service-role" {
+resource "aws_iam_role_policy_attachment" "ecs-policy" {
   role       = aws_iam_role.ecs-service-role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonECS_FullAccess"
 }
 
-resource "aws_ecs_service" "advisor-web" {
-  cluster                            = aws_ecs_cluster.spoke-cluster.arn
+resource "aws_iam_role_policy_attachment" "ec2-policy" {
+  role       = aws_iam_role.ecs-service-role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "cw-policy" {
+  role       = aws_iam_role.ecs-service-role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+}
+
+resource "aws_ecs_service" "spoke" {
+  cluster                            = aws_ecs_cluster.cluster.arn
   deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 100
   desired_count                      = 1
@@ -390,7 +327,7 @@ resource "aws_ecs_service" "advisor-web" {
   health_check_grace_period_seconds  = 0
   iam_role                           = aws_iam_role.ecs-service-role.name
   launch_type                        = "EC2"
-  name                               = "advisor-web"
+  name                               = "spoke"
   scheduling_strategy                = "REPLICA"
   tags                               = {}
   task_definition                    = "${aws_ecs_task_definition.web.family}:${aws_ecs_task_definition.web.revision}"
@@ -440,10 +377,13 @@ module "load_balancer" {
   source         = "./modules/LoadBalancers"
   security_group = aws_security_group.service
   subnets = {
-    main      = aws_subnet.ecs-subnet
-    secondary = aws_subnet.ecs-subnet-alt
+    main      = { id = local.subnet }
+    secondary = { id = local.subnet-alt }
   }
-  vpc         = aws_vpc.ecs-vpc
+  vpc = {
+    id  = local.vpc
+    arn = local.vpc
+  }
   domain_name = "spoke.reyrodrigues.me"
-  lb_name     = "advisor-lb"
+  lb_name     = "spoke-lb"
 }
